@@ -1,0 +1,12 @@
+version: '3'
+services:
+  flask-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+      - "8050:8050"
+    volumes:
+      - ./logs:/app/logs
+    restart: always

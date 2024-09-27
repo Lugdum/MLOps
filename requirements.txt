@@ -3,5 +3,8 @@ transformers
 flasgger
 torch
 dash
-streamlit
+dash-core-components
+dash-html-components
 requests
+flask-httpauth
+flask-jwt-extended
