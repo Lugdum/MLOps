@@ -3,7 +3,5 @@ transformers
 flasgger
 torch
 dash
-time
-collections
 streamlit
 requests
