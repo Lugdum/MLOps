@@ -3,6 +3,8 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
+ENV PYTHONPATH=/app/src
+
 # Installer les dépendances
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
