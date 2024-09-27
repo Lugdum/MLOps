@@ -1,53 +1,74 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-import torch
+from flask import Flask, request, jsonify
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from flasgger import Swagger
+import torch
 
-# Initialiser l'application FastAPI
-app = FastAPI()
+app = Flask(__name__)
 
-# Charger le tokenizer et le modèle
+# Ajouter Swagger
+swagger = Swagger(app)
+
+# Charger le modèle et le tokenizer
 tokenizer = AutoTokenizer.from_pretrained("mshenoda/roberta-spam")
 model = AutoModelForSequenceClassification.from_pretrained("mshenoda/roberta-spam")
+model.eval()
 
-# Définir l'appareil (CPU ou GPU)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model.to(device)
-model.eval()  # Mettre le modèle en mode évaluation
+# Compteur pour suivre le nombre de requêtes
+request_count = 0
 
-# Classe pour les requêtes de prédiction
-class PredictionRequest(BaseModel):
-    text: str
-
-# Prétraitement du texte
-def preprocess_text(text, tokenizer, max_len=128):
-    result = tokenizer.encode_plus(
-        text,
-        add_special_tokens=True,
-        max_length=max_len,
-        pad_to_max_length=True,
-        return_attention_mask=True,
-        truncation=True
-    )
-    ids = torch.tensor(result['input_ids']).unsqueeze(0).to(device)
-    mask = torch.tensor(result['attention_mask']).unsqueeze(0).to(device)
-    return ids, mask
-
-# Endpoint pour la prédiction
-@app.post("/predict")
-async def predict(request: PredictionRequest):
-    text = request.text
-    ids, mask = preprocess_text(text, tokenizer)
+@app.route('/predict', methods=['POST'])
+def predict():
+    """
+    Prédire si un texte est un spam ou non.
+    ---
+    parameters:
+      - name: text
+        in: body
+        type: string
+        required: true
+        description: Le texte à classifier
+    responses:
+      200:
+        description: Le résultat de la prédiction
+        schema:
+          type: object
+          properties:
+            text:
+              type: string
+            prediction:
+              type: string
+    """
+    global request_count
+    request_count += 1
     
+    # Extraire le texte de la requête
+    data = request.json
+    text = data.get("text", "")
+    
+    # Prétraiter et faire une prédiction
+    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
     with torch.no_grad():
-        output = model(ids, mask)
-        logits = output["logits"].squeeze(-1).cpu().numpy()
+        outputs = model(**inputs)
+        logits = outputs.logits
+        prediction = torch.argmax(logits, dim=-1).item()
     
-    # Récupérer la classe avec la probabilité la plus élevée
-    predicted_label = logits.argmax(axis=-1).item()
-    
-    # Assumer les labels pour ce modèle
-    class_names = ['humain', 'spam']  # Remplace par les vraies classes du modèle si nécessaire
-    predicted_class = class_names[predicted_label]
+    return jsonify({"text": text, "prediction": "spam" if prediction == 1 else "humain"})
 
-    return {"text": text, "predicted_class": predicted_class, "confidence": float(logits.max())}
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    """
+    Obtenir le nombre de requêtes effectuées.
+    ---
+    responses:
+      200:
+        description: Le nombre de requêtes
+        schema:
+          type: object
+          properties:
+            request_count:
+              type: integer
+    """
+    return jsonify({"request_count": request_count})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8000)
