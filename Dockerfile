@@ -16,5 +16,8 @@ COPY . /app
 EXPOSE 8000
 EXPOSE 8050
 
+# Créer le volume pour la base de données
+VOLUME /app/metrics
+
 # Lancer l'application (Flask et Dash sont dans le même app.py)
 CMD ["python", "src/api/app.py"]

@@ -1,5 +1,5 @@
-import requests
-from requests.auth import HTTPBasicAuth
+import sqlite3
+import time
 
 # Simuler une base de données d'utilisateurs avec des rôles
 users = {
@@ -15,51 +15,64 @@ roles_permissions = {
     "normal": []
 }
 
-# Initialiser les métriques
-total_request_count = 0
-request_count_in_interval = 0
-error_count = 0
+DATABASE = 'metrics.db'
 
-jwt_token = None
+# Création d'une table pour stocker les métriques
+def init_db():
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            total_requests INTEGER,
+            errors INTEGER
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
 
-# Fonction pour obtenir un token JWT
-def get_jwt_token():
-    login_url = "http://localhost:8000/login"
+# Insertion d'une nouvelle métrique
+def update_metrics(total=0, error=0):
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
     
-    # Envoie les identifiants dans l'en-tête Basic Auth
-    response = requests.post(login_url, auth=HTTPBasicAuth('admin', 'adminpass'))
+    cursor.execute('''
+        INSERT INTO metrics (total_requests, errors)
+        VALUES (?, ?)
+    ''', (total, error))
     
-    if response.status_code == 200:
-        token = response.json().get('access_token')
-        if token:
-            return token
+    conn.commit()
+    conn.close()
+
+# Récupérer les X dernières métriques, en ajoutant des 0 si nécessaire
+def get_metrics(last_n):
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+
+    # Sélectionner les dernières X entrées, groupées par intervalle de 2 secondes
+    cursor.execute('''
+        SELECT strftime('%H:%M:%S', timestamp), SUM(total_requests), SUM(errors)
+        FROM metrics
+        GROUP BY (strftime('%s', timestamp) / 2)  -- Grouper par intervalles de 2 secondes
+        ORDER BY timestamp DESC
+        LIMIT ?
+    ''', (last_n,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Générer les intervalles manquants avec des 0
+    timestamps = [time.strftime('%H:%M:%S', time.localtime(time.time() - 2 * i)) for i in range(last_n)]
+    metrics_dict = {row[0]: (row[1], row[2]) for row in rows}
+
+    result = []
+    for ts in timestamps:
+        if ts in metrics_dict:
+            result.append((ts, metrics_dict[ts][0], metrics_dict[ts][1]))
         else:
-            print("Aucun token reçu.")
-    else:
-        print(f"Erreur lors de l'obtention du token JWT: {response.status_code}")
-        return None
+            result.append((ts, 0, 0))  # Ajouter des 0 si aucune donnée n'existe pour cet intervalle
 
-# Fonction pour obtenir les métriques via l'API Flask
-def get_metrics():
-    global jwt_token
-
-    if jwt_token is None:
-        jwt_token = get_jwt_token()
-
-    metrics_url = "http://localhost:8000/metrics"
-    headers = {"Authorization": f"Bearer {jwt_token}"}
-
-    response = requests.get(metrics_url, headers=headers)
-
-    # Si la requête échoue à cause d'un token invalide, on essaie de régénérer le token
-    if response.status_code == 401:
-        print("Token expiré ou invalide, régénération du token...")
-        jwt_token = get_jwt_token()
-        headers = {"Authorization": f"Bearer {jwt_token}"}
-        response = requests.get(metrics_url, headers=headers)
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"Erreur lors de la récupération des métriques: {response.status_code}")
-        return None
+    return result

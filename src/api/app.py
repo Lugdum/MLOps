@@ -1,22 +1,18 @@
 import multiprocessing
-import requests
-from requests.auth import HTTPBasicAuth
 from flask import Flask, request, render_template, redirect, url_for
 from flasgger import Swagger
 from flask_jwt_extended import JWTManager, create_access_token, verify_jwt_in_request, set_access_cookies
-import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output
-import requests
-import time
-from collections import deque
 
 from logging_config import configure_logging
-from utils import users
+from utils import users, init_db, update_metrics
 from api.auth import auth
 from api.routes import routes_bp
 from api.dash_app import create_dash_app
 
+# Initialiser la base de données SQLite
+init_db()
+
+# Créer une application Flask
 app = Flask(__name__)
 
 # Configuration Swagger pour utiliser JWT Bearer Token
@@ -51,6 +47,9 @@ app.register_blueprint(routes_bp)
 def verify_password(username, password):
     if username in users and users[username]['password'] == password:
         return username
+    else:
+        update_metrics(error=1)
+        return None
 
 @auth.get_user_roles
 def get_user_roles(user):

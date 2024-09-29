@@ -1,10 +1,9 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, create_access_token
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
 from logging_config import configure_logging
-from utils import users, roles_permissions, total_request_count, request_count_in_interval, error_count
+from utils import users, roles_permissions, update_metrics
 from models import tokenizer, model
 from api.auth import auth
 
@@ -40,6 +39,11 @@ def login():
         description: Authentification échouée
     """
     username = auth.current_user()
+
+    if not username:
+        update_metrics(error=1)
+        return jsonify({"error": "Invalid credentials"}), 401
+    
     access_token = create_access_token(identity=username)
     return jsonify(access_token=access_token)
 
@@ -88,21 +92,24 @@ def predict():
       403:
         description: Accès refusé (pour un utilisateur sans permission)
     """
-    global total_request_count, request_count_in_interval
+    # global total_request_count, request_count_in_interval
     current_user = get_jwt_identity()
     user_role = users[current_user]["role"]
     
     if "predict" not in roles_permissions[user_role]:
+        update_metrics(error=1)
         return jsonify({"error": "Access denied"}), 403
     
-    try:
-        # Mettre à jour les compteurs de requêtes
-        total_request_count += 1
-        request_count_in_interval += 1
-        
+    try:        
         # Extraire le texte de la requête
         data = request.json
-        text = data.get("text", "")
+        if not data or 'text' not in data:
+            raise ValueError("Le champ 'text' est requis.")
+        
+        text = data.get("text", "").strip()
+
+        if not text:
+            raise ValueError("Le texte ne peut pas être vide.")
         
         # Prétraiter et faire une prédiction
         inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
@@ -114,11 +121,11 @@ def predict():
         # Loguer la requête et la réponse
         user_logger.info(f"Requête de {current_user}: {text}, Réponse: {'spam' if prediction == 1 else 'humain'}")
         
+        update_metrics(total=1)
         return jsonify({"text": text, "prediction": "spam" if prediction == 1 else "humain"})
     
     except Exception as e:
-        global error_count
-        error_count += 1
+        update_metrics(error=1)
         user_logger.error(f"Erreur pour la requête de {current_user}: {e}")
         return jsonify({"error": "Une erreur est survenue"}), 400
 
@@ -241,15 +248,15 @@ def metrics():
     # Loguer les requêtes de métriques séparément
     metrics_logger.info(f"Requête de métrique de {current_user}")
 
-    global total_request_count, request_count_in_interval, error_count
+    # global total_request_count, request_count_in_interval, error_count
 
-    metric_data = {
-        "total_request_count": total_request_count,
-        "request_count_in_interval": request_count_in_interval,
-        "error_count": error_count
-    }
+    # metric_data = {
+    #     "total_request_count": total_request_count,
+    #     "request_count_in_interval": request_count_in_interval,
+    #     "error_count": error_count
+    # }
 
-    # Réinitialiser le compteur de requêtes dans l'intervalle
-    request_count_in_interval = 0
+    # # Réinitialiser le compteur de requêtes dans l'intervalle
+    # request_count_in_interval = 0
 
-    return jsonify(metric_data)
+    return "a completer"
